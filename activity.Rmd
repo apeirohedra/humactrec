@@ -1,0 +1,196 @@
+---
+title: "raport"
+output: html_document
+---
+
+
+# Final Project Report - Practical Machine Learning Course
+
+## Project info
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [Groupware@LES] (http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+Human Activity Recognition - **HAR** - has emerged as a key research area in the last years and is gaining increasing attention by the pervasive computing research community (see picture below, that illustrates the increasing number of publications in HAR with wearable accelerometers), especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises. 
+
+[The training data for this project are available here] (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+[The test data are available here] (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+[The data for this project come from this source] (http://groupware.les.inf.puc-rio.br/har). If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+The goal of your project is to predict the manner in which they did the exercise. This is the “classe” variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Loading data
+
+```{r load_data}
+#download files from the urls provided
+#train_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#download.file(url=train_url, destfile="training.csv")
+
+#test_url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+#download.file(url=test_url, destfile="testing.csv")
+
+#read in training and testing data
+training <- read.csv("training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("testing.csv", na.strings=c("NA","#DIV/0!",""))
+```
+
+## Loading needed libraries
+
+```{r lib_load}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(knitr)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(e1071)
+library(gmb)
+```
+
+## Split training/testing data
+
+```{r partition}
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+```
+
+```{r dimen, echo=TRUE}
+dim(myTraining); dim(myTesting)
+```
+
+## Cleaning the data
+
+Remove NearZeroVariance variables
+```{r nzv}
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+myTraining <- myTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(myTesting,saveMetrics=TRUE)
+myTesting <- myTesting[,nzv$nzv==FALSE]
+```
+Remove the first column of the myTraining data set
+```{r rm}
+myTraining <- myTraining[c(-1)]
+```
+Clean variables with more than $60$ $\%$ NA
+```{r clean}
+trainingV3 <- myTraining
+for(i in 1:length(myTraining)) {
+    if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .7) {
+        for(j in 1:length(trainingV3)) {
+            if( length( grep(names(myTraining[i]), names(trainingV3)[j]) ) == 1)  {
+                trainingV3 <- trainingV3[ , -j]
+            }   
+        } 
+    }
+}
+```
+Set back to the original variable name
+```{r back}
+myTraining <- trainingV3
+rm(trainingV3)
+```
+Now let us do the exact same 3 transformations but for our myTesting and testing data sets
+```{r trans}
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58])  # remove the classe column
+myTesting <- myTesting[clean1]         # allow only variables in myTesting that are also in myTraining
+testing <- testing[clean2]             # allow only variables in testing that are also in myTraining
+```
+
+```{r newdim, echo=TRUE}
+dim(myTesting); dim(testing)
+```
+Coerce the data into the same type
+```{r functio}
+for (i in 1:length(testing) ) {
+    for(j in 1:length(myTraining)) {
+        if( length( grep(names(myTraining[i]), names(testing)[j]) ) == 1)  {
+            class(testing[j]) <- class(myTraining[i])
+        }      
+    }      
+}
+```
+To get the same class between testing and myTraining
+```{r same}
+testing <- rbind(myTraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+
+# Prediction with Decision Trees
+
+```{r tree, fig.width=12, fig.height=7}
+set.seed(12345)
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+fancyRpartPlot(modFitA1, main="Decision tree", sub="rpart decision tree", palettes = c("Greys", "Oranges"))
+```
+Prediction and sing confusion Matrix to test results
+```{r prediction}
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+cmtree <- confusionMatrix(predictionsA1, myTesting$classe)
+cmtree
+```
+Plot decision tree confusion matrix
+```{r cmplot, fig.aling="center", fig.width=10}
+plot(cmtree$table, col = cmtree$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy =",
+round(cmtree$overall['Accuracy'], 4)))
+```
+
+Prediction with random forests
+
+```{r rf}
+set.seed(12345)
+modFitB1 <- randomForest(classe ~ ., data=myTraining)
+predictionB1 <- predict(modFitB1, myTesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, myTesting$classe)
+cmrf
+```
+
+Plot random forests confusion matrix
+
+```{r rfcm, fig.align="center", fig.width=10}
+plot(cmrf$table, col = cmtree$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", 
+round(cmrf$overall['Accuracy'], 4)))
+```
+# Prediction with Generalized Boosted Regression
+```{r gener}
+set.seed(12345)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbmFit1 <- train(classe ~ ., data=myTraining, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+
+gbmFinMod1 <- gbmFit1$finalModel
+
+gbmPredTest <- predict(gbmFit1, newdata=myTesting)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, myTesting$classe)
+gbmAccuracyTest
+```
+
+# Predicting Results on the Test Data
+
+Random Forests gave an Accuracy in the myTesting dataset of $99.82\%$, which was more accurate that what I got from the Decision Trees or GBM. The expected out-of-sample error is $100-99.82 = 0.18\%$.
+
+```{r pred2}
+predictionB2 <- predict(modFitB1, testing, type = "class")
+predictionB2
+```
+Write the results to a folder as a text file for submission
+```{r funcsub}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(predictionB2)
+```
